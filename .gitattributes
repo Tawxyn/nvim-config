@@ -1,0 +1,8 @@
+# Normalize line endings
+* text=auto
+
+# Treat Lua files as text
+*.lua text
+
+# Improve diffing for Lua
+*.lua diff=lua

@@ -1,0 +1,12 @@
+# Neovim swap/backup/undo files
+*.swp
+*.swo
+*.bak
+*.tmp
+*.undo
+
+# Session files
+Session.vim
+
+# Tag files
+tags
