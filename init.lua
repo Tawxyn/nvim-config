@@ -152,7 +152,16 @@ require("lazy").setup({
 				end,
 			},
 			"nvim-telescope/telescope-ui-select.nvim",
-			{ "nvim-tree/nvim-web-devicons", enabled = vim.g.have_nerd_font },
+			{
+				"nvim-tree/nvim-web-devicons",
+				lazy = true,
+				config = function()
+					require("nvim-web-devicons").setup({
+						override = {},
+						default = true,
+					})
+				end,
+			},
 		},
 		config = function()
 			require("telescope").setup({
