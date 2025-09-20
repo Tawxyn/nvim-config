@@ -402,12 +402,29 @@ require("lazy").setup({
 		config = function()
 			require("mini.ai").setup({ n_lines = 500 })
 			require("mini.surround").setup()
-			local st = require("mini.statusline")
-			st.setup({ use_icons = vim.g.have_nerd_font })
-			st.section_location = function()
-				return "%2l:%-2v"
-			end
 		end,
+	},
+
+	{ -- Status Line
+		"nvim-lualine/lualine.nvim",
+		dependencies = { "nvim-tree/nvim-web-devicons" },
+		opts = {
+			options = {
+				theme = "auto",
+				icons_enabled = true,
+				globalstatus = true,
+				section_separators = { left = "", right = "" },
+				component_separators = { left = "│", right = "│" },
+			},
+			sections = {
+				lualine_a = { "mode" },
+				lualine_b = { "branch", "diff", { "diagnostics", sources = { "nvim_diagnostic" } } },
+				lualine_c = { { "filename", path = 1 } },
+				lualine_x = { "encoding", "fileformat", "filetype" },
+				lualine_y = { "progress" },
+				lualine_z = { "location" },
+			},
+		},
 	},
 
 	{ -- Treesitter
