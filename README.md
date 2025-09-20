@@ -1,2 +1,2 @@
 # nvim-config
-My nvim configuration.
+My nvim configuration, currently monolithic.
