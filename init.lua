@@ -3,6 +3,7 @@ vim.g.maplocalleader = " "
 vim.g.have_nerd_font = false
 
 -- Options
+vim.o.termguicolors = true
 vim.o.number = true
 vim.o.relativenumber = true
 vim.o.mouse = "a"
@@ -70,19 +71,53 @@ vim.opt.rtp:prepend(lazypath)
 require("lazy").setup({
 	"NMAC427/guess-indent.nvim",
 
-	{ -- Git signs
+	{ --git diff
 		"lewis6991/gitsigns.nvim",
 		opts = {
 			signs = {
-				add = { text = "+" },
-				change = { text = "~" },
-				delete = { text = "_" },
-				topdelete = { text = "‾" },
-				changedelete = { text = "~" },
+				add = { hl = "GitSignsAdd", text = "+", numhl = "GitSignsAddNr", linehl = "GitSignsAddLn" },
+				change = { hl = "GitSignsChange", text = "~", numhl = "GitSignsChangeNr", linehl = "GitSignsChangeLn" },
+				delete = { hl = "GitSignsDelete", text = "-", numhl = "GitSignsDeleteNr", linehl = "GitSignsDeleteLn" },
+				topdelete = {
+					hl = "GitSignsDelete",
+					text = "-",
+					numhl = "GitSignsDeleteNr",
+					linehl = "GitSignsDeleteLn",
+				},
+				changedelete = {
+					hl = "GitSignsChange",
+					text = "~",
+					numhl = "GitSignsChangeNr",
+					linehl = "GitSignsChangeLn",
+				},
 			},
-		},
-	},
+			numhl = false,
+			linehl = false,
+			current_line_blame = false,
+			on_attach = function(bufnr)
+				local gs = package.loaded.gitsigns
+				local map = function(lhs, rhs, desc, mode)
+					vim.keymap.set(mode or "n", lhs, rhs, { buffer = bufnr, desc = desc })
+				end
 
+				-- Full buffer diff
+				map("<leader>hd", function()
+					gs.diffthis()
+				end, "Diff Buffer (Split)")
+
+				-- Hunk preview (chunk diff)
+				map("<leader>hp", function()
+					gs.preview_hunk({ max_height = 15, border = "rounded" })
+				end, "Preview Hunk (Chunk Diff)")
+			end,
+		},
+		config = function(_, opts)
+			require("gitsigns").setup(opts)
+			vim.api.nvim_set_hl(0, "GitSignsAdd", { fg = "#98c379" })
+			vim.api.nvim_set_hl(0, "GitSignsChange", { fg = "#e5c07b" })
+			vim.api.nvim_set_hl(0, "GitSignsDelete", { fg = "#e06c75" })
+		end,
+	},
 	{ -- which-key
 		"folke/which-key.nvim",
 		event = "VimEnter",
@@ -378,15 +413,14 @@ require("lazy").setup({
 		},
 	},
 
-	{ -- Colorscheme
-		"tanvirtin/monokai.nvim",
+	{
+		"nyoom-engineering/oxocarbon.nvim",
+		lazy = false,
 		priority = 1000,
 		config = function()
-			require("monokai").setup({
-				palette = require("monokai").pro,
-				styles = { comments = { italic = false } },
-			})
-			vim.cmd.colorscheme("monokai")
+			vim.opt.background = "dark"
+			vim.g.oxocarbon_lua_transparent = true -- optional
+			vim.cmd("colorscheme oxocarbon")
 		end,
 	},
 
