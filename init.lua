@@ -37,11 +37,13 @@ vim.o.expandtab = true
 vim.keymap.set("n", "<Esc>", "<cmd>nohlsearch<CR>")
 vim.keymap.set("n", "<leader>q", vim.diagnostic.setloclist, { desc = "Diagnostics to loclist" })
 vim.keymap.set("t", "<Esc><Esc>", "<C-\\><C-n>", { desc = "Exit terminal mode" })
-vim.keymap.set("n", "<leader>e", ":Neotree toggle<CR>", { desc = "Toggle Neo-tree" })
+vim.keymap.set("n", "<leader>e", "<cmd>Neotree toggle<CR>", { desc = "Toggle Neo-tree" })
 vim.keymap.set("n", "<C-h>", "<C-w><C-h>", { desc = "Win left" })
 vim.keymap.set("n", "<C-l>", "<C-w><C-l>", { desc = "Win right" })
 vim.keymap.set("n", "<C-j>", "<C-w><C-j>", { desc = "Win down" })
 vim.keymap.set("n", "<C-k>", "<C-w><C-k>", { desc = "Win up" })
+vim.keymap.set("n", "[d", function() vim.diagnostic.jump({ count = -1 }) end, { desc = "Prev diagnostic" })
+vim.keymap.set("n", "]d", function() vim.diagnostic.jump({ count = 1 }) end, { desc = "Next diagnostic" })
 
 -- Yank highlight
 vim.api.nvim_create_autocmd("TextYankPost", {
@@ -69,7 +71,7 @@ end
 vim.opt.rtp:prepend(lazypath)
 
 require("lazy").setup({
-	"NMAC427/guess-indent.nvim",
+	{ "NMAC427/guess-indent.nvim", event = "BufReadPost", opts = {} },
 
 	{ --git diff
 		"lewis6991/gitsigns.nvim",
@@ -99,6 +101,15 @@ require("lazy").setup({
 				local map = function(lhs, rhs, desc, mode)
 					vim.keymap.set(mode or "n", lhs, rhs, { buffer = bufnr, desc = desc })
 				end
+
+				-- Hunk navigation
+				map("]h", gs.next_hunk, "Next Hunk")
+				map("[h", gs.prev_hunk, "Prev Hunk")
+
+				-- Hunk actions
+				map("<leader>hs", gs.stage_hunk, "Stage Hunk")
+				map("<leader>hr", gs.reset_hunk, "Reset Hunk")
+				map("<leader>hu", gs.undo_stage_hunk, "Undo Stage Hunk")
 
 				-- Full buffer diff
 				map("<leader>hd", function()
@@ -387,7 +398,6 @@ require("lazy").setup({
 				end)(),
 				opts = {},
 			},
-			"folke/lazydev.nvim",
 		},
 		opts = {
 			keymap = { preset = "super-tab" },
@@ -465,25 +475,24 @@ require("lazy").setup({
 	{ -- Treesitter
 		"nvim-treesitter/nvim-treesitter",
 		build = ":TSUpdate",
-		main = "nvim-treesitter.configs",
-		opts = {
-			ensure_installed = {
-				"bash",
-				"c",
-				"diff",
-				"html",
-				"lua",
-				"luadoc",
-				"markdown",
-				"markdown_inline",
-				"query",
-				"vim",
-				"vimdoc",
-			},
-			auto_install = true,
-			highlight = { enable = true, additional_vim_regex_highlighting = { "ruby" } },
-			indent = { enable = true, disable = { "ruby" } },
-		},
+		config = function()
+			require("nvim-treesitter").setup({
+				ensure_installed = {
+					"bash",
+					"c",
+					"diff",
+					"html",
+					"lua",
+					"luadoc",
+					"markdown",
+					"markdown_inline",
+					"query",
+					"vim",
+					"vimdoc",
+				},
+				auto_install = true,
+			})
+		end,
 	},
 
 	{ -- Neo-tree
