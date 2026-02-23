@@ -2,7 +2,7 @@
 * text=auto
 
 # Treat Lua files as text
-*.lua text
+*.lua text eol=lf
 
 # Improve diffing for Lua
 *.lua diff=lua

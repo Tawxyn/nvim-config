@@ -8,6 +8,7 @@ vim.o.number = true
 vim.o.relativenumber = true
 vim.o.mouse = "a"
 vim.o.showmode = false
+vim.o.cmdheight = 1
 vim.schedule(function()
 	vim.o.clipboard = "unnamedplus"
 end)
@@ -20,12 +21,28 @@ vim.o.updatetime = 250
 vim.o.timeoutlen = 300
 vim.o.splitright = true
 vim.o.splitbelow = true
-vim.o.list = true
-vim.opt.listchars = { tab = "» ", trail = "·", nbsp = "␣" }
+vim.o.list = false
+vim.opt.listchars = { tab = ">>", trail = ".", nbsp = "_" }
 vim.o.inccommand = "split"
 vim.o.cursorline = true
 vim.o.scrolloff = 10
 vim.o.confirm = true
+vim.opt.fillchars = { eob = ' ' }
+vim.opt.winborder = "rounded"
+
+-- Use LSP folding for Rust buffers
+vim.api.nvim_create_autocmd("FileType", {
+	pattern = "rust",
+	callback = function()
+		vim.opt_local.foldmethod = "expr"
+		vim.opt_local.foldexpr = "v:lua.vim.lsp.foldexpr()"
+		vim.opt_local.foldenable = true
+		vim.opt_local.foldlevel = 99 -- start with everything open
+		-- Optional UI niceties
+		-- vim.opt_local.foldcolumn = '1'
+		-- vim.opt_local.fillchars  = { fold = ' ' }
+	end,
+})
 
 -- Tabs & indentation
 vim.o.tabstop = 4
@@ -33,9 +50,31 @@ vim.o.shiftwidth = 4
 vim.o.softtabstop = 4
 vim.o.expandtab = true
 
+-- Tab helper function
+local function toggle_loclist()
+	-- If any window is a loclist window, close it and return
+	for _, win in ipairs(vim.api.nvim_list_wins()) do
+		local info = vim.fn.getwininfo(win)[1]
+		if info and info.loclist == 1 then
+			vim.cmd("lclose")
+			return
+		end
+	end
+
+	-- Otherwise, fill loclist with diagnostics and open it
+	vim.diagnostic.setloclist({ open = true })
+end
 -- Keymaps
 vim.keymap.set("n", "<Esc>", "<cmd>nohlsearch<CR>")
-vim.keymap.set("n", "<leader>q", vim.diagnostic.setloclist, { desc = "Diagnostics to loclist" })
+vim.keymap.set("n", "K", function()
+	local clients = vim.lsp.get_clients({ bufnr = 0 })
+	if clients and #clients > 0 then
+		vim.lsp.buf.hover()
+	else
+		vim.cmd("normal! K")
+	end
+end, { desc = "Hover docs (LSP/man)" })
+vim.keymap.set("n", "<leader>q", toggle_loclist, { desc = "Toggle diagnostics loclist" })
 vim.keymap.set("t", "<Esc><Esc>", "<C-\\><C-n>", { desc = "Exit terminal mode" })
 vim.keymap.set("n", "<leader>e", "<cmd>Neotree toggle<CR>", { desc = "Toggle Neo-tree" })
 vim.keymap.set("n", "<C-h>", "<C-w><C-h>", { desc = "Win left" })
@@ -48,6 +87,9 @@ end, { desc = "Prev diagnostic" })
 vim.keymap.set("n", "]d", function()
 	vim.diagnostic.jump({ count = 1 })
 end, { desc = "Next diagnostic" })
+vim.keymap.set("n", "gl", function()
+	vim.diagnostic.open_float(nil, { scope = "line", border = "rounded", source = "if_many", focusable = false })
+end, { desc = "Line diagnostics" })
 
 -- Yank highlight
 vim.api.nvim_create_autocmd("TextYankPost", {
@@ -128,9 +170,20 @@ require("lazy").setup({
 		},
 		config = function(_, opts)
 			require("gitsigns").setup(opts)
-			vim.api.nvim_set_hl(0, "GitSignsAdd", { fg = "#98c379" })
-			vim.api.nvim_set_hl(0, "GitSignsChange", { fg = "#e5c07b" })
-			vim.api.nvim_set_hl(0, "GitSignsDelete", { fg = "#e06c75" })
+			local set_gitsigns_hl = function()
+				vim.api.nvim_set_hl(0, "GitSignsAdd", { fg = "#a6e22e" })
+				vim.api.nvim_set_hl(0, "GitSignsAddNr", { fg = "#a6e22e" })
+				vim.api.nvim_set_hl(0, "GitSignsChange", { fg = "#ffff00" })
+				vim.api.nvim_set_hl(0, "GitSignsChangeNr", { fg = "#ffff00" })
+				vim.api.nvim_set_hl(0, "GitSignsDelete", { fg = "#ff5555" })
+				vim.api.nvim_set_hl(0, "GitSignsDeleteNr", { fg = "#ff5555" })
+				vim.api.nvim_set_hl(0, "GitSignsChangedelete", { fg = "#ffff00" })
+			end
+			set_gitsigns_hl()
+			vim.api.nvim_create_autocmd("ColorScheme", {
+				group = vim.api.nvim_create_augroup("custom-gitsigns-colors", { clear = true }),
+				callback = set_gitsigns_hl,
+			})
 		end,
 	},
 	{ -- which-key
@@ -145,10 +198,10 @@ require("lazy").setup({
 					Down = "<Down> ",
 					Left = "<Left> ",
 					Right = "<Right> ",
-					C = "<C-…> ",
-					M = "<M-…> ",
-					D = "<D-…> ",
-					S = "<S-…> ",
+					C = "<C-...> ",
+					M = "<M-...> ",
+					D = "<D-...> ",
+					S = "<S-...> ",
 					CR = "<CR> ",
 					Esc = "<Esc> ",
 					ScrollWheelDown = "<SWD> ",
@@ -251,6 +304,7 @@ require("lazy").setup({
 			"mason-org/mason-lspconfig.nvim",
 			"WhoIsSethDaniel/mason-tool-installer.nvim",
 			{ "j-hui/fidget.nvim", opts = {} },
+			{ "SmiteshP/nvim-navic", opts = { highlight = true, separator = " > ", depth_limit = 5 } },
 			"saghen/blink.cmp",
 			{
 				"folke/lazydev.nvim",
@@ -261,6 +315,26 @@ require("lazy").setup({
 			},
 		},
 		config = function()
+			local set_float_border_hl = function()
+				vim.api.nvim_set_hl(0, "FloatBorder", { fg = "#ffffff", bg = "NONE" })
+			end
+			set_float_border_hl()
+			vim.api.nvim_create_autocmd("ColorScheme", {
+				group = vim.api.nvim_create_augroup("custom-float-border", { clear = true }),
+				callback = set_float_border_hl,
+			})
+
+			vim.lsp.handlers["textDocument/hover"] = vim.lsp.with(vim.lsp.handlers.hover, {
+				border = "rounded",
+				max_width = 90,
+				max_height = 30,
+			})
+			vim.lsp.handlers["textDocument/signatureHelp"] = vim.lsp.with(vim.lsp.handlers.signature_help, {
+				border = "rounded",
+				max_width = 90,
+				max_height = 30,
+			})
+
 			vim.api.nvim_create_autocmd("LspAttach", {
 				group = vim.api.nvim_create_augroup("kickstart-lsp-attach", { clear = true }),
 				callback = function(ev)
@@ -273,6 +347,8 @@ require("lazy").setup({
 					map("gri", require("telescope.builtin").lsp_implementations, "Implementation")
 					map("grd", require("telescope.builtin").lsp_definitions, "Definition")
 					map("grD", vim.lsp.buf.declaration, "Declaration")
+					map("K", vim.lsp.buf.hover, "Hover Documentation")
+					map("gK", vim.lsp.buf.signature_help, "Signature Help")
 					map("gO", require("telescope.builtin").lsp_document_symbols, "Document Symbols")
 					map("gW", require("telescope.builtin").lsp_dynamic_workspace_symbols, "Workspace Symbols")
 					map("grt", require("telescope.builtin").lsp_type_definitions, "Type Definition")
@@ -286,6 +362,13 @@ require("lazy").setup({
 					end
 
 					local client = vim.lsp.get_client_by_id(ev.data.client_id)
+					if client and supports(client, vim.lsp.protocol.Methods.textDocument_documentSymbol, ev.buf) then
+						local ok_navic, navic = pcall(require, "nvim-navic")
+						if ok_navic and not navic.is_available(ev.buf) then
+							pcall(navic.attach, client, ev.buf)
+						end
+					end
+
 					if client and supports(client, vim.lsp.protocol.Methods.textDocument_documentHighlight, ev.buf) then
 						local hl = vim.api.nvim_create_augroup("kickstart-lsp-highlight", { clear = false })
 						vim.api.nvim_create_autocmd({ "CursorHold", "CursorHoldI" }, {
@@ -315,44 +398,43 @@ require("lazy").setup({
 				end,
 			})
 
+			local diag_max = 80
+			local diag_text = function(d)
+				local msg = d.message:gsub("%s+", " ")
+				if #msg > diag_max then
+					return msg:sub(1, diag_max - 3) .. "..."
+				end
+				return msg
+			end
+
 			vim.diagnostic.config({
 				severity_sort = true,
-				float = { border = "rounded", source = "if_many" },
+				float = { border = "rounded", source = "if_many", max_width = 100 },
 				underline = { severity = vim.diagnostic.severity.ERROR },
 				signs = vim.g.have_nerd_font and {
 					text = {
-						[vim.diagnostic.severity.ERROR] = "󰅚 ",
-						[vim.diagnostic.severity.WARN] = "󰀪 ",
-						[vim.diagnostic.severity.INFO] = "󰋽 ",
-						[vim.diagnostic.severity.HINT] = "󰌶 ",
+						[vim.diagnostic.severity.ERROR] = "E ",
+						[vim.diagnostic.severity.WARN] = "W ",
+						[vim.diagnostic.severity.INFO] = "I ",
+						[vim.diagnostic.severity.HINT] = "H ",
 					},
 				} or {},
-				virtual_text = {
-					source = "if_many",
-					spacing = 2,
-					format = function(d)
-						return d.message
-					end,
-				},
+				virtual_text = false,
+				virtual_lines = false,
 			})
 
 			local capabilities = require("blink.cmp").get_lsp_capabilities()
 			local servers = {
 				lua_ls = { settings = { Lua = { completion = { callSnippet = "Replace" } } } },
-				rust_analyzer = {
-					settings = {
-						["rust-analyzer"] = {},
-					},
-				},
 			}
 
 			local ensure = vim.tbl_keys(servers)
-			vim.list_extend(ensure, { "stylua" })
+			vim.list_extend(ensure, { "stylua", "rustfmt", "taplo", "rust-analyzer" })
 			require("mason-tool-installer").setup({ ensure_installed = ensure })
 
 			require("mason-lspconfig").setup({
 				ensure_installed = {},
-				automatic_installation = false,
+				automatic_enable = false,
 				handlers = {
 					function(name)
 						local cfg = servers[name] or {}
@@ -361,6 +443,34 @@ require("lazy").setup({
 					end,
 				},
 			})
+		end,
+	},
+	{
+		"mrcjkb/rustaceanvim",
+		version = "^6",
+		ft = { "rust" },
+		init = function()
+			local caps = vim.lsp.protocol.make_client_capabilities()
+			local ok, blink = pcall(require, "blink.cmp")
+			if ok then
+				caps = blink.get_lsp_capabilities(caps)
+			end
+			vim.g.rustaceanvim = {
+				server = {
+					capabilities = caps,
+					settings = {
+						["rust-analyzer"] = {
+							cargo = {
+								allFeatures = false,
+								loadOutDirsFromCheck = true,
+								buildScripts = { enable = true },
+							},
+							check = { command = "check" },
+							procMacro = { enable = true },
+						},
+					},
+				},
+			}
 		end,
 	},
 
@@ -387,7 +497,11 @@ require("lazy").setup({
 				end
 				return { timeout_ms = 500, lsp_format = "fallback" }
 			end,
-			formatters_by_ft = { lua = { "stylua" } },
+			formatters_by_ft = {
+				lua = { "stylua" },
+				rust = { "rustfmt" },
+				toml = { "taplo" },
+			},
 		},
 	},
 
@@ -449,7 +563,23 @@ require("lazy").setup({
 		dependencies = { "nvim-lua/plenary.nvim" },
 		opts = { signs = false },
 	},
-
+	{
+		"saecki/crates.nvim",
+		ft = { "toml" },
+		config = function()
+			require("crates").setup({})
+		end,
+	},
+	{
+		"folke/trouble.nvim",
+		cmd = "Trouble",
+		keys = {
+			{ "<leader>xx", "<cmd>Trouble diagnostics toggle<CR>", desc = "Diagnostics (Trouble)" },
+			{ "<leader>xq", "<cmd>Trouble qflist toggle<CR>", desc = "Quickfix (Trouble)" },
+			{ "<leader>xl", "<cmd>Trouble loclist toggle<CR>", desc = "Loclist (Trouble)" },
+		},
+		opts = {},
+	},
 	{ -- mini.nvim collection
 		"echasnovski/mini.nvim",
 		config = function()
@@ -467,13 +597,41 @@ require("lazy").setup({
 				theme = "auto",
 				icons_enabled = true,
 				globalstatus = true,
-				section_separators = { left = "", right = "" },
-				component_separators = { left = "│", right = "│" },
+				section_separators = { left = "", right = "" },
+				component_separators = { left = "|", right = "|" },
 			},
 			sections = {
 				lualine_a = { "mode" },
-				lualine_b = { "branch", "diff", { "diagnostics", sources = { "nvim_diagnostic" } } },
-				lualine_c = { { "filename", path = 1 } },
+				lualine_b = {
+					"branch",
+					{
+						"diff",
+						colored = true,
+						symbols = { added = "+", modified = "~", removed = "-" },
+						diff_color = {
+							added = { fg = "#a6e22e" },
+							modified = { fg = "#ffff00" },
+							removed = { fg = "#ff5555" },
+						},
+					},
+					{ "diagnostics", sources = { "nvim_diagnostic" } },
+				},
+				lualine_c = {
+					{ "filename", path = 1 },
+					{
+						function()
+							local ok, navic = pcall(require, "nvim-navic")
+							if ok and navic.is_available() then
+								return navic.get_location()
+							end
+							return ""
+						end,
+						cond = function()
+							local ok, navic = pcall(require, "nvim-navic")
+							return ok and navic.is_available()
+						end,
+					},
+				},
 				lualine_x = { "encoding", "fileformat", "filetype" },
 				lualine_y = { "progress" },
 				lualine_z = { "location" },
@@ -485,21 +643,27 @@ require("lazy").setup({
 		"nvim-treesitter/nvim-treesitter",
 		build = ":TSUpdate",
 		config = function()
-			require("nvim-treesitter").setup({
+			require("nvim-treesitter.configs").setup({
 				ensure_installed = {
 					"bash",
 					"c",
 					"diff",
 					"html",
+					"json",
 					"lua",
 					"luadoc",
 					"markdown",
 					"markdown_inline",
 					"query",
+					"rust",
+					"toml",
 					"vim",
 					"vimdoc",
+					"yaml",
 				},
 				auto_install = true,
+				highlight = { enable = true },
+				indent = { enable = true },
 			})
 		end,
 	},
@@ -513,19 +677,19 @@ require("lazy").setup({
 }, {
 	ui = {
 		icons = vim.g.have_nerd_font and {} or {
-			cmd = "⌘",
-			config = "🛠",
-			event = "📅",
-			ft = "📂",
-			init = "⚙",
-			keys = "🗝",
-			plugin = "🔌",
-			runtime = "💻",
-			require = "🌙",
-			source = "📄",
-			start = "🚀",
-			task = "📌",
-			lazy = "💤 ",
+			cmd = "CMD",
+			config = "CFG",
+			event = "EVT",
+			ft = "FT",
+			init = "INIT",
+			keys = "KEY",
+			plugin = "PLG",
+			runtime = "RT",
+			require = "REQ",
+			source = "SRC",
+			start = "ST",
+			task = "TSK",
+			lazy = "ZZZ",
 		},
 	},
 })
