@@ -488,21 +488,29 @@ require("lazy").setup({
 				desc = "Format buffer",
 			},
 		},
-		opts = {
-			notify_on_error = false,
-			format_on_save = function(buf)
-				local disable = { c = true, cpp = true }
-				if disable[vim.bo[buf].filetype] then
-					return nil
-				end
-				return { timeout_ms = 500, lsp_format = "fallback" }
-			end,
-			formatters_by_ft = {
-				lua = { "stylua" },
-				rust = { "rustfmt" },
-				toml = { "taplo" },
-			},
-		},
+		opts = function()
+			local rustup_rustfmt = vim.fn.expand("$HOME/.cargo/bin/rustfmt.exe")
+			return {
+				notify_on_error = false,
+				formatters = {
+					rustfmt = {
+						command = (vim.fn.executable(rustup_rustfmt) == 1) and rustup_rustfmt or "rustfmt",
+					},
+				},
+				format_on_save = function(buf)
+					local disable = { c = true, cpp = true }
+					if disable[vim.bo[buf].filetype] then
+						return nil
+					end
+					return { timeout_ms = 500, lsp_format = "fallback" }
+				end,
+				formatters_by_ft = {
+					lua = { "stylua" },
+					rust = { "rustfmt" },
+					toml = { "taplo" },
+				},
+			}
+		end,
 	},
 
 	{ -- Completion
