@@ -81,15 +81,9 @@ vim.keymap.set("n", "<C-h>", "<C-w><C-h>", { desc = "Win left" })
 vim.keymap.set("n", "<C-l>", "<C-w><C-l>", { desc = "Win right" })
 vim.keymap.set("n", "<C-j>", "<C-w><C-j>", { desc = "Win down" })
 vim.keymap.set("n", "<C-k>", "<C-w><C-k>", { desc = "Win up" })
-vim.keymap.set("n", "[d", function()
-	vim.diagnostic.jump({ count = -1 })
-end, { desc = "Prev diagnostic" })
-vim.keymap.set("n", "]d", function()
-	vim.diagnostic.jump({ count = 1 })
-end, { desc = "Next diagnostic" })
-vim.keymap.set("n", "gl", function()
-	vim.diagnostic.open_float(nil, { scope = "line", border = "rounded", source = "if_many", focusable = false })
-end, { desc = "Line diagnostics" })
+vim.keymap.set("n", "[d", function() vim.diagnostic.jump({ count = -1 }) end, { desc = "Prev diagnostic" })
+vim.keymap.set("n", "]d", function() vim.diagnostic.jump({ count = 1 }) end, { desc = "Next diagnostic" })
+vim.keymap.set("n", "<leader>tv", "<cmd>vertical terminal<CR>", { desc = "Terminal (vertical)" })
 
 -- Yank highlight
 vim.api.nvim_create_autocmd("TextYankPost", {
