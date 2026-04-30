@@ -2,6 +2,22 @@ vim.g.mapleader = " "
 vim.g.maplocalleader = " "
 vim.g.have_nerd_font = false
 
+local data_site = vim.fn.stdpath("data") .. "\\site"
+if not vim.tbl_contains(vim.opt.runtimepath:get(), data_site) then
+	vim.opt.runtimepath:prepend(data_site)
+end
+
+if vim.fn.executable("pwsh") == 0 then
+	vim.env.PATH = vim.fn.stdpath("config") .. ";" .. vim.env.PATH
+end
+
+if vim.fn.executable("python3") == 0 then
+	vim.g.loaded_python3_provider = 0
+end
+vim.g.loaded_node_provider = 0
+vim.g.loaded_perl_provider = 0
+vim.g.loaded_ruby_provider = 0
+
 -- Options
 vim.o.termguicolors = true
 vim.o.number = true
@@ -27,8 +43,34 @@ vim.o.inccommand = "split"
 vim.o.cursorline = true
 vim.o.scrolloff = 10
 vim.o.confirm = true
+vim.o.autoread = true
+vim.o.autoindent = true
 vim.opt.fillchars = { eob = ' ' }
 vim.opt.winborder = "rounded"
+
+local external_file_changes = vim.api.nvim_create_augroup("external-file-changes", { clear = true })
+
+vim.api.nvim_create_autocmd({ "FocusGained", "BufEnter", "CursorHold", "CursorHoldI", "TermClose", "TermLeave" }, {
+	group = external_file_changes,
+	callback = function()
+		if vim.fn.mode() ~= "c" then
+			vim.cmd("checktime")
+		end
+	end,
+})
+
+vim.api.nvim_create_autocmd("FileChangedShellPost", {
+	group = external_file_changes,
+	callback = function()
+		vim.notify("Reloaded file changed outside Neovim", vim.log.levels.WARN)
+	end,
+})
+
+if vim.fn.exists(":LspInfo") == 0 then
+	vim.api.nvim_create_user_command("LspInfo", function()
+		vim.cmd("checkhealth vim.lsp")
+	end, { desc = "Alias to :checkhealth vim.lsp" })
+end
 
 -- Use LSP folding for Rust buffers
 vim.api.nvim_create_autocmd("FileType", {
@@ -38,6 +80,8 @@ vim.api.nvim_create_autocmd("FileType", {
 		vim.opt_local.foldexpr = "v:lua.vim.lsp.foldexpr()"
 		vim.opt_local.foldenable = true
 		vim.opt_local.foldlevel = 99 -- start with everything open
+		vim.opt_local.autoindent = true
+		vim.opt_local.smartindent = true
 		-- Optional UI niceties
 		-- vim.opt_local.foldcolumn = '1'
 		-- vim.opt_local.fillchars  = { fold = ' ' }
@@ -147,12 +191,50 @@ require("lazy").setup({
 				local map = function(lhs, rhs, desc, mode)
 					vim.keymap.set(mode or "n", lhs, rhs, { buffer = bufnr, desc = desc })
 				end
+				local jump_hunk_start = function(direction)
+					local hunks = gs.get_hunks(bufnr) or {}
+					if #hunks == 0 then
+						vim.notify("No hunks", vim.log.levels.WARN)
+						return
+					end
+
+					local line = vim.api.nvim_win_get_cursor(0)[1]
+					local target
+
+					if direction == "next" then
+						for _, hunk in ipairs(hunks) do
+							if hunk.added.start > line then
+								target = hunk
+								break
+							end
+						end
+						target = target or hunks[1]
+					else
+						for i = #hunks, 1, -1 do
+							local hunk = hunks[i]
+							if hunk.added.start < line then
+								target = hunk
+								break
+							end
+						end
+						target = target or hunks[#hunks]
+					end
+
+					vim.cmd([[normal! m']])
+					vim.api.nvim_win_set_cursor(0, { math.max(target.added.start, 1), 0 })
+				end
 
 				-- Hunk navigation
 				map("]h", gs.next_hunk, "Next Hunk")
 				map("[h", gs.prev_hunk, "Prev Hunk")
 
 				-- Hunk actions
+				map("<leader>hn", function()
+					jump_hunk_start("next")
+				end, "Next Hunk")
+				map("<leader>hm", function()
+					jump_hunk_start("prev")
+				end, "Prev Hunk")
 				map("<leader>hs", gs.stage_hunk, "Stage Hunk")
 				map("<leader>hr", gs.reset_hunk, "Reset Hunk")
 				map("<leader>hu", gs.undo_stage_hunk, "Undo Stage Hunk")
@@ -324,12 +406,19 @@ require("lazy").setup({
 				callback = set_float_border_hl,
 			})
 
-			vim.lsp.handlers["textDocument/hover"] = vim.lsp.with(vim.lsp.handlers.hover, {
+			local bordered_handler = function(handler, opts)
+				return function(err, result, ctx, config)
+					config = vim.tbl_deep_extend("force", config or {}, opts)
+					return handler(err, result, ctx, config)
+				end
+			end
+
+			vim.lsp.handlers["textDocument/hover"] = bordered_handler(vim.lsp.handlers.hover, {
 				border = "rounded",
 				max_width = 90,
 				max_height = 30,
 			})
-			vim.lsp.handlers["textDocument/signatureHelp"] = vim.lsp.with(vim.lsp.handlers.signature_help, {
+			vim.lsp.handlers["textDocument/signatureHelp"] = bordered_handler(vim.lsp.handlers.signature_help, {
 				border = "rounded",
 				max_width = 90,
 				max_height = 30,
@@ -429,7 +518,7 @@ require("lazy").setup({
 			}
 
 			local ensure = vim.tbl_keys(servers)
-			vim.list_extend(ensure, { "stylua", "rustfmt", "taplo", "rust-analyzer" })
+			vim.list_extend(ensure, { "stylua", "taplo" })
 			require("mason-tool-installer").setup({ ensure_installed = ensure })
 
 			require("mason-lspconfig").setup({
@@ -450,6 +539,46 @@ require("lazy").setup({
 		version = "^6",
 		ft = { "rust" },
 		init = function()
+			local mason_rust_analyzer = vim.fn.stdpath("data") .. "/mason/packages/rust-analyzer/rust-analyzer.exe"
+			local cargo_bin = vim.fn.expand("$HOME/.cargo/bin")
+			local rust_analyzer_bin = cargo_bin .. "/rust-analyzer.exe"
+			local rust_server_status_seen = {}
+			local status_notify_level = "error"
+			local function rust_server_status_handler(_, result, ctx, _)
+				if not result or not result.quiescent then
+					return
+				end
+
+				if result.health and result.health ~= "ok" then
+					local should_notify = status_notify_level == "warning"
+						or (status_notify_level == "error" and result.health == "error")
+					if should_notify then
+						local message = ([[
+rust-analyzer health status is [%s]:
+%s
+Run ':RustLsp logFile' for details.
+]]):format(result.health, result.message or "[unknown error]")
+						vim.notify(message, vim.log.levels.WARN)
+					end
+				end
+
+				if rust_server_status_seen[ctx.client_id] then
+					return
+				end
+
+				local client = vim.lsp.get_client_by_id(ctx.client_id)
+				if client and type(vim.lsp.inlay_hint) == "table" and type(client.attached_buffers) == "table" then
+					for bufnr, _ in pairs(client.attached_buffers) do
+						if vim.lsp.inlay_hint.is_enabled({ bufnr = bufnr }) then
+							vim.lsp.inlay_hint.enable(false, { bufnr = bufnr })
+							vim.lsp.inlay_hint.enable(true, { bufnr = bufnr })
+						end
+					end
+				end
+
+				rust_server_status_seen[ctx.client_id] = true
+			end
+
 			local caps = vim.lsp.protocol.make_client_capabilities()
 			local ok, blink = pcall(require, "blink.cmp")
 			if ok then
@@ -457,7 +586,12 @@ require("lazy").setup({
 			end
 			vim.g.rustaceanvim = {
 				server = {
+					cmd = (vim.fn.executable(mason_rust_analyzer) == 1) and { mason_rust_analyzer }
+						or ((vim.fn.executable(rust_analyzer_bin) == 1) and { rust_analyzer_bin } or nil),
 					capabilities = caps,
+					handlers = {
+						["experimental/serverStatus"] = rust_server_status_handler,
+					},
 					settings = {
 						["rust-analyzer"] = {
 							cargo = {
@@ -517,6 +651,7 @@ require("lazy").setup({
 		"saghen/blink.cmp",
 		event = "VimEnter",
 		version = "1.*",
+		build = (vim.fn.executable("cargo") == 1) and "cargo build --release" or nil,
 		dependencies = {
 			{
 				"L3MON4D3/LuaSnip",
@@ -649,29 +784,54 @@ require("lazy").setup({
 
 	{ -- Treesitter
 		"nvim-treesitter/nvim-treesitter",
+		branch = "main",
+		lazy = false,
 		build = ":TSUpdate",
 		config = function()
-			require("nvim-treesitter.configs").setup({
-				ensure_installed = {
-					"bash",
-					"c",
-					"diff",
-					"html",
-					"json",
-					"lua",
-					"luadoc",
-					"markdown",
-					"markdown_inline",
-					"query",
-					"rust",
-					"toml",
-					"vim",
-					"vimdoc",
-					"yaml",
-				},
-				auto_install = true,
-				highlight = { enable = true },
-				indent = { enable = true },
+			local ts = require("nvim-treesitter")
+			local parsers = {
+				"bash",
+				"c",
+				"diff",
+				"html",
+				"json",
+				"lua",
+				"luadoc",
+				"markdown",
+				"markdown_inline",
+				"query",
+				"rust",
+				"toml",
+				"vim",
+				"vimdoc",
+				"yaml",
+			}
+
+			ts.setup({ install_dir = data_site })
+			vim.api.nvim_create_user_command("TSInstallConfigured", function()
+				ts.install(parsers)
+			end, { desc = "Install configured Treesitter parsers" })
+
+			local treesitter_features = vim.api.nvim_create_augroup("treesitter-features", { clear = true })
+			local parser_languages = {}
+			local treesitter_indent_disabled = {
+				rust = true,
+			}
+			for _, lang in ipairs(parsers) do
+				parser_languages[lang] = true
+			end
+
+			vim.api.nvim_create_autocmd("FileType", {
+				group = treesitter_features,
+				callback = function(args)
+					if not parser_languages[args.match] then
+						return
+					end
+					local ok = pcall(vim.treesitter.start, args.buf)
+					if ok and not treesitter_indent_disabled[args.match] then
+						vim.bo[args.buf].indentexpr = "v:lua.require'nvim-treesitter'.indentexpr()"
+					end
+				end,
 			})
 		end,
 	},
@@ -680,7 +840,16 @@ require("lazy").setup({
 		"nvim-neo-tree/neo-tree.nvim",
 		branch = "v3.x",
 		dependencies = { "nvim-lua/plenary.nvim", "nvim-tree/nvim-web-devicons", "MunifTanjim/nui.nvim" },
-		opts = { filesystem = { follow_current_file = { enabled = true } } },
+		opts = {
+			filesystem = {
+				follow_current_file = { enabled = true },
+				filtered_items = {
+					hide_dotfiles = false,
+					hide_gitignored = false,
+					hide_hidden = false,
+				},
+			},
+		},
 	},
 }, {
 	ui = {
