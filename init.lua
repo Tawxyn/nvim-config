@@ -304,6 +304,7 @@ require("lazy").setup({
 				{ "<leader>s", group = "[S]earch" },
 				{ "<leader>t", group = "[T]oggle" },
 				{ "<leader>h", group = "Git [H]unk", mode = { "n", "v" } },
+				{ "<leader>d", group = "[D]ebug" },
 			},
 		},
 	},
@@ -512,7 +513,7 @@ require("lazy").setup({
 			}
 
 			local ensure = vim.tbl_keys(servers)
-			vim.list_extend(ensure, { "stylua", "taplo" })
+			vim.list_extend(ensure, { "stylua", "taplo", "codelldb" })
 			require("mason-tool-installer").setup({ ensure_installed = ensure })
 
 			require("mason-lspconfig").setup({
@@ -529,11 +530,266 @@ require("lazy").setup({
 		end,
 	},
 	{
+		"mfussenegger/nvim-dap",
+		dependencies = {
+			{
+				"igorlfs/nvim-dap-view",
+				version = "1.*",
+				opts = {
+					windows = {
+						position = "below",
+						size = 0.25,
+					},
+					auto_toggle = true,
+					virtual_text = {
+						enabled = true,
+					},
+					icons = {
+						collapsed = "> ",
+						disabled = "x",
+						disconnect = "disconnect",
+						enabled = "ok",
+						expanded = "v ",
+						filter = "filter",
+						negate = "not",
+						pause = "pause",
+						play = "run",
+						run_last = "last",
+						step_back = "back",
+						step_into = "into",
+						step_out = "out",
+						step_over = "next",
+						terminate = "stop",
+					},
+				},
+			},
+		},
+		keys = {
+			{
+				"<F5>",
+				function()
+					require("dap").continue()
+				end,
+				desc = "Debug: Continue",
+			},
+			{
+				"<F8>",
+				function()
+					require("dap").step_out()
+				end,
+				desc = "Debug: Step out",
+			},
+			{
+				"<F9>",
+				function()
+					require("dap").step_over()
+				end,
+				desc = "Debug: Step over",
+			},
+			{
+				"<F10>",
+				function()
+					require("dap").step_into()
+				end,
+				desc = "Debug: Step into",
+			},
+			{
+				"<leader>dc",
+				function()
+					require("dap").continue()
+				end,
+				desc = "Continue/start",
+			},
+			{
+				"<leader>db",
+				function()
+					require("dap").toggle_breakpoint()
+				end,
+				desc = "Toggle breakpoint",
+			},
+			{
+				"<leader>dn",
+				function()
+					require("dap").step_over()
+				end,
+				desc = "Step over",
+			},
+			{
+				"<leader>di",
+				function()
+					require("dap").step_into()
+				end,
+				desc = "Step into",
+			},
+			{
+				"<leader>do",
+				function()
+					require("dap").step_out()
+				end,
+				desc = "Step out",
+			},
+			{
+				"<leader>dB",
+				function()
+					require("dap").set_breakpoint(vim.fn.input("Breakpoint condition: "))
+				end,
+				desc = "Conditional breakpoint",
+			},
+			{
+				"<leader>dl",
+				function()
+					require("dap").set_breakpoint(nil, nil, vim.fn.input("Log point message: "))
+				end,
+				desc = "Logpoint",
+			},
+			{
+				"<leader>dr",
+				function()
+					require("dap").repl.toggle()
+				end,
+				desc = "Toggle REPL",
+			},
+			{
+				"<leader>dt",
+				function()
+					local dap = require("dap")
+					local session = dap.session()
+					pcall(require("dap-view").close, true)
+					if session then
+						pcall(vim.fn.sign_unplace, session.sign_group)
+						pcall(dap.continue)
+						vim.schedule(function()
+							session.current_frame = nil
+							session.stopped_thread_id = nil
+							for _, thread in pairs(session.threads or {}) do
+								thread.stopped = false
+							end
+						end)
+					end
+				end,
+				desc = "Finish debug run",
+			},
+			{
+				"<leader>dL",
+				function()
+					require("dap").run_last()
+				end,
+				desc = "Run last",
+			},
+			{
+				"<leader>dv",
+				function()
+					require("dap-view").toggle()
+				end,
+				desc = "Toggle debug view",
+			},
+			{
+				"<leader>df",
+				function()
+					local dap_view = require("dap-view")
+					local state = require("dap-view.state")
+					local util = require("dap-view.util")
+					if not util.is_win_valid(state.winnr) then
+						dap_view.open()
+					end
+					if util.is_win_valid(state.winnr) then
+						vim.api.nvim_set_current_win(state.winnr)
+					end
+				end,
+				desc = "Focus debug view",
+			},
+			{
+				"<leader>dh",
+				function()
+					require("dap.ui.widgets").hover(nil, { border = "rounded" })
+				end,
+				desc = "Hover variable",
+				mode = { "n", "x" },
+			},
+			{
+				"<leader>dw",
+				function()
+					require("dap-view").add_expr()
+				end,
+				desc = "Add watch",
+				mode = { "n", "x" },
+			},
+			{
+				"<leader>dd",
+				"<cmd>RustLsp debuggables<CR>",
+				desc = "Rust debuggables",
+				ft = "rust",
+			},
+			{
+				"<leader>dD",
+				"<cmd>RustLsp debug<CR>",
+				desc = "Rust debug target",
+				ft = "rust",
+			},
+		},
+		config = function()
+			local dap = require("dap")
+			local clear_stopped_state = function(session)
+				session = session or dap.session()
+				if session then
+					pcall(vim.fn.sign_unplace, session.sign_group)
+					session.current_frame = nil
+					session.stopped_thread_id = nil
+					for _, thread in pairs(session.threads or {}) do
+						thread.stopped = false
+					end
+				end
+			end
+
+			local set_dap_hl = function()
+				vim.api.nvim_set_hl(0, "NvimDapViewWatchExpr", { fg = "#82cfff" })
+				vim.api.nvim_set_hl(0, "NvimDapViewWatchUpdated", { fg = "#ffff00", bold = true })
+				vim.api.nvim_set_hl(0, "NvimDapViewWatchError", { fg = "#ff5555", bold = true })
+				vim.api.nvim_set_hl(0, "NvimDapViewThread", { fg = "#a6e22e" })
+				vim.api.nvim_set_hl(0, "NvimDapViewThreadStopped", { fg = "#82cfff", bold = true })
+				vim.api.nvim_set_hl(0, "NvimDapViewThreadError", { fg = "#ff5555", bold = true })
+				vim.api.nvim_set_hl(0, "NvimDapViewFrameCurrent", { fg = "#ffff00", bg = "#262626", bold = true })
+				vim.api.nvim_set_hl(0, "NvimDapViewFileName", { fg = "#82cfff" })
+				vim.api.nvim_set_hl(0, "NvimDapViewLineNumber", { fg = "#a6e22e" })
+				vim.api.nvim_set_hl(0, "NvimDapViewSeparator", { fg = "#6f6f6f" })
+				vim.api.nvim_set_hl(0, "NvimDapViewMissingData", { fg = "#ff5555" })
+				vim.api.nvim_set_hl(0, "NvimDapViewVirtualText", { fg = "#6f6f6f" })
+				vim.api.nvim_set_hl(0, "NvimDapViewVirtualTextUpdated", { fg = "#ffff00", italic = true })
+				vim.api.nvim_set_hl(0, "NvimDapViewControlPlay", { fg = "#a6e22e" })
+				vim.api.nvim_set_hl(0, "NvimDapViewControlPause", { fg = "#ffff00" })
+				vim.api.nvim_set_hl(0, "NvimDapViewControlStepInto", { fg = "#82cfff" })
+				vim.api.nvim_set_hl(0, "NvimDapViewControlStepOut", { fg = "#82cfff" })
+				vim.api.nvim_set_hl(0, "NvimDapViewControlStepOver", { fg = "#82cfff" })
+				vim.api.nvim_set_hl(0, "NvimDapViewControlTerminate", { fg = "#ff5555" })
+				vim.api.nvim_set_hl(0, "NvimDapViewControlDisconnect", { fg = "#ff5555" })
+			end
+
+			set_dap_hl()
+			vim.api.nvim_create_autocmd("ColorScheme", {
+				group = vim.api.nvim_create_augroup("custom-dap-view-colors", { clear = true }),
+				callback = set_dap_hl,
+			})
+
+			vim.fn.sign_define("DapBreakpoint", { text = "B", texthl = "DiagnosticSignError" })
+			vim.fn.sign_define("DapBreakpointCondition", { text = "C", texthl = "DiagnosticSignWarn" })
+			vim.fn.sign_define("DapLogPoint", { text = "L", texthl = "DiagnosticSignInfo" })
+			vim.fn.sign_define("DapStopped", { text = "=>", texthl = "DiagnosticSignHint", linehl = "Visual" })
+			vim.fn.sign_define("DapBreakpointRejected", { text = "X", texthl = "DiagnosticSignWarn" })
+
+			dap.listeners.after.continue["custom-clear-stopped-sign"] = clear_stopped_state
+			dap.listeners.after.event_continued["custom-clear-stopped-sign"] = clear_stopped_state
+			dap.listeners.before.event_exited["custom-clear-stopped-sign"] = clear_stopped_state
+			dap.listeners.before.event_terminated["custom-clear-stopped-sign"] = clear_stopped_state
+		end,
+	},
+	{
 		"mrcjkb/rustaceanvim",
 		version = "^6",
 		ft = { "rust" },
 		init = function()
 			local mason_rust_analyzer = vim.fn.stdpath("data") .. "/mason/packages/rust-analyzer/rust-analyzer.exe"
+			local codelldb_path = vim.fn.stdpath("data") .. "/mason/packages/codelldb/extension/adapter/codelldb.exe"
+			local liblldb_path = vim.fn.stdpath("data") .. "/mason/packages/codelldb/extension/lldb/bin/liblldb.dll"
 			local cargo_bin = vim.fn.expand("$HOME/.cargo/bin")
 			local rust_analyzer_bin = cargo_bin .. "/rust-analyzer.exe"
 			local rust_server_status_seen = {}
@@ -579,6 +835,16 @@ Run ':RustLsp logFile' for details.
 				caps = blink.get_lsp_capabilities(caps)
 			end
 			vim.g.rustaceanvim = {
+				dap = {
+					autoload_configurations = true,
+					adapter = function()
+						if vim.fn.executable(codelldb_path) == 0 or vim.fn.filereadable(liblldb_path) == 0 then
+							vim.notify("CodeLLDB is not installed. Run :MasonInstall codelldb.", vim.log.levels.WARN)
+							return false
+						end
+						return require("rustaceanvim.config").get_codelldb_adapter(codelldb_path, liblldb_path)
+					end,
+				},
 				server = {
 					cmd = (vim.fn.executable(mason_rust_analyzer) == 1) and { mason_rust_analyzer }
 						or ((vim.fn.executable(rust_analyzer_bin) == 1) and { rust_analyzer_bin } or nil),
