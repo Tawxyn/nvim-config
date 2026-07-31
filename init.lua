@@ -11,6 +11,19 @@ if vim.fn.executable("pwsh") == 0 then
 	vim.env.PATH = vim.fn.stdpath("config") .. ";" .. vim.env.PATH
 end
 
+if vim.fn.has("win32") == 1 and vim.fn.executable("git") == 0 then
+	local git_paths = {
+		"C:\\Program Files\\Git\\cmd",
+		"C:\\Program Files (x86)\\Git\\cmd",
+	}
+	for _, path in ipairs(git_paths) do
+		if vim.fn.isdirectory(path) == 1 then
+			vim.env.PATH = path .. ";" .. vim.env.PATH
+			break
+		end
+	end
+end
+
 if vim.fn.executable("python3") == 0 then
 	vim.g.loaded_python3_provider = 0
 end
@@ -113,7 +126,7 @@ vim.keymap.set("n", "<Esc>", "<cmd>nohlsearch<CR>")
 vim.keymap.set("n", "K", function()
 	local clients = vim.lsp.get_clients({ bufnr = 0 })
 	if clients and #clients > 0 then
-		vim.lsp.buf.hover()
+		vim.lsp.buf.hover({ max_width = 90, max_height = 30 })
 	else
 		vim.cmd("normal! K")
 	end
@@ -393,7 +406,8 @@ require("lazy").setup({
 		},
 		config = function()
 			local set_float_border_hl = function()
-				vim.api.nvim_set_hl(0, "FloatBorder", { fg = "#ffffff", bg = "NONE" })
+				local normal = vim.api.nvim_get_hl(0, { name = "Normal", link = false })
+				vim.api.nvim_set_hl(0, "FloatBorder", { fg = normal.fg, bg = "NONE" })
 			end
 			set_float_border_hl()
 			vim.api.nvim_create_autocmd("ColorScheme", {
@@ -401,23 +415,9 @@ require("lazy").setup({
 				callback = set_float_border_hl,
 			})
 
-			local bordered_handler = function(handler, opts)
-				return function(err, result, ctx, config)
-					config = vim.tbl_deep_extend("force", config or {}, opts)
-					return handler(err, result, ctx, config)
-				end
-			end
-
-			vim.lsp.handlers["textDocument/hover"] = bordered_handler(vim.lsp.handlers.hover, {
-				border = "rounded",
-				max_width = 90,
-				max_height = 30,
-			})
-			vim.lsp.handlers["textDocument/signatureHelp"] = bordered_handler(vim.lsp.handlers.signature_help, {
-				border = "rounded",
-				max_width = 90,
-				max_height = 30,
-			})
+			-- Borders come from vim.o.winborder ("rounded"); pass only size caps at the
+			-- hover/signature call sites below.
+			local hover_opts = { max_width = 90, max_height = 30 }
 
 			vim.api.nvim_create_autocmd("LspAttach", {
 				group = vim.api.nvim_create_augroup("kickstart-lsp-attach", { clear = true }),
@@ -431,8 +431,12 @@ require("lazy").setup({
 					map("gri", require("telescope.builtin").lsp_implementations, "Implementation")
 					map("grd", require("telescope.builtin").lsp_definitions, "Definition")
 					map("grD", vim.lsp.buf.declaration, "Declaration")
-					map("K", vim.lsp.buf.hover, "Hover Documentation")
-					map("gK", vim.lsp.buf.signature_help, "Signature Help")
+					map("K", function()
+						vim.lsp.buf.hover(hover_opts)
+					end, "Hover Documentation")
+					map("gK", function()
+						vim.lsp.buf.signature_help(hover_opts)
+					end, "Signature Help")
 					map("gO", require("telescope.builtin").lsp_document_symbols, "Document Symbols")
 					map("gW", require("telescope.builtin").lsp_dynamic_workspace_symbols, "Workspace Symbols")
 					map("grt", require("telescope.builtin").lsp_type_definitions, "Type Definition")
@@ -513,7 +517,7 @@ require("lazy").setup({
 			}
 
 			local ensure = vim.tbl_keys(servers)
-			vim.list_extend(ensure, { "stylua", "taplo", "codelldb" })
+			vim.list_extend(ensure, { "stylua", "taplo", "codelldb", "rust-analyzer" })
 			require("mason-tool-installer").setup({ ensure_installed = ensure })
 
 			require("mason-lspconfig").setup({
@@ -540,7 +544,7 @@ require("lazy").setup({
 						position = "below",
 						size = 0.25,
 					},
-					auto_toggle = true,
+					auto_toggle = false,
 					virtual_text = {
 						enabled = true,
 					},
@@ -716,13 +720,29 @@ require("lazy").setup({
 			},
 			{
 				"<leader>dd",
-				"<cmd>RustLsp debuggables<CR>",
+				function()
+					if vim.tbl_isempty(require("dap.breakpoints").get()) then
+						vim.notify(
+							"No breakpoints set — program will run to exit. Set one with <leader>db.",
+							vim.log.levels.WARN
+						)
+					end
+					vim.cmd("RustLsp debuggables")
+				end,
 				desc = "Rust debuggables",
 				ft = "rust",
 			},
 			{
 				"<leader>dD",
-				"<cmd>RustLsp debug<CR>",
+				function()
+					if vim.tbl_isempty(require("dap.breakpoints").get()) then
+						vim.notify(
+							"No breakpoints set — program will run to exit. Set one with <leader>db.",
+							vim.log.levels.WARN
+						)
+					end
+					vim.cmd("RustLsp debug")
+				end,
 				desc = "Rust debug target",
 				ft = "rust",
 			},
@@ -780,6 +800,27 @@ require("lazy").setup({
 			dap.listeners.after.event_continued["custom-clear-stopped-sign"] = clear_stopped_state
 			dap.listeners.before.event_exited["custom-clear-stopped-sign"] = clear_stopped_state
 			dap.listeners.before.event_terminated["custom-clear-stopped-sign"] = clear_stopped_state
+
+			-- Drive the debug view explicitly (auto_toggle is off): open it on session
+			-- start and deliberately leave it open when the session ends, so a program
+			-- that runs to completion doesn't flash the window closed. It is closed via
+			-- <leader>dt (finish) and <leader>dv (toggle).
+			dap.listeners.after.event_initialized["custom-dap-view-open"] = function()
+				pcall(require("dap-view").open)
+			end
+
+			-- Always give feedback when a session ends, so a run-to-completion reads as
+			-- "exited (code 0)" instead of silence (usually means no breakpoint was hit).
+			local notify_exit = function(_, body)
+				local code = body and body.exitCode
+				vim.notify(
+					code ~= nil and ("Debug session exited (code " .. code .. ")")
+						or "Debug session terminated",
+					vim.log.levels.INFO
+				)
+			end
+			dap.listeners.after.event_exited["custom-dap-notify-exit"] = notify_exit
+			dap.listeners.after.event_terminated["custom-dap-notify-exit"] = notify_exit
 		end,
 	},
 	{
@@ -950,13 +991,12 @@ Run ':RustLsp logFile' for details.
 	},
 
 	{
-		"nyoom-engineering/oxocarbon.nvim",
+		"Tawxyn/mush.nvim",
 		lazy = false,
 		priority = 1000,
 		config = function()
-			vim.opt.background = "dark"
-			vim.g.oxocarbon_lua_transparent = true -- optional
-			vim.cmd("colorscheme oxocarbon")
+			require("mush").setup()
+			vim.cmd.colorscheme("mush-dark")
 		end,
 	},
 
@@ -1071,6 +1111,20 @@ Run ':RustLsp logFile' for details.
 			vim.api.nvim_create_user_command("TSInstallConfigured", function()
 				ts.install(parsers)
 			end, { desc = "Install configured Treesitter parsers" })
+
+			-- Auto-install any configured parsers that aren't present yet (no-op when
+			-- all are installed), so highlighting works on a fresh machine without
+			-- having to run :TSInstallConfigured manually.
+			local installed = {}
+			for _, lang in ipairs(ts.get_installed("parsers")) do
+				installed[lang] = true
+			end
+			local missing = vim.tbl_filter(function(lang)
+				return not installed[lang]
+			end, parsers)
+			if #missing > 0 then
+				ts.install(missing)
+			end
 
 			local treesitter_features = vim.api.nvim_create_augroup("treesitter-features", { clear = true })
 			local parser_languages = {}
