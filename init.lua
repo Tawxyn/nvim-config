@@ -168,6 +168,12 @@ end
 vim.opt.rtp:prepend(lazypath)
 
 require("lazy").setup({
+	{ --Synergy DBL syntax/ftplugin/indent (local checkout)
+		dir = "C:/Users/MichaelOleshchuk/dev/lexdbl",
+		name = "lexdbl",
+		ft = "synergydbl",
+	},
+
 	{ "NMAC427/guess-indent.nvim", event = "BufReadPost", opts = {} },
 
 	{ --git diff
@@ -831,8 +837,15 @@ require("lazy").setup({
 			local mason_rust_analyzer = vim.fn.stdpath("data") .. "/mason/packages/rust-analyzer/rust-analyzer.exe"
 			local codelldb_path = vim.fn.stdpath("data") .. "/mason/packages/codelldb/extension/adapter/codelldb.exe"
 			local liblldb_path = vim.fn.stdpath("data") .. "/mason/packages/codelldb/extension/lldb/bin/liblldb.dll"
-			local cargo_bin = vim.fn.expand("$HOME/.cargo/bin")
-			local rust_analyzer_bin = cargo_bin .. "/rust-analyzer.exe"
+			-- ~/.cargo/bin/rust-analyzer.exe is a rustup proxy that exists even when the
+			-- component is not installed, so ask rustup where the real binary lives.
+			local rustup_rust_analyzer = nil
+			if vim.fn.executable("rustup") == 1 then
+				local resolved = vim.trim(vim.fn.system({ "rustup", "which", "rust-analyzer" }))
+				if vim.v.shell_error == 0 and vim.fn.executable(resolved) == 1 then
+					rustup_rust_analyzer = resolved
+				end
+			end
 			local rust_server_status_seen = {}
 			local status_notify_level = "error"
 			local function rust_server_status_handler(_, result, ctx, _)
@@ -887,8 +900,13 @@ Run ':RustLsp logFile' for details.
 					end,
 				},
 				server = {
-					cmd = (vim.fn.executable(mason_rust_analyzer) == 1) and { mason_rust_analyzer }
-						or ((vim.fn.executable(rust_analyzer_bin) == 1) and { rust_analyzer_bin } or nil),
+					-- Prefer the rustup component: it is always version-matched to the
+					-- active toolchain. A rust-analyzer older than the installed rustc
+					-- silently fails to resolve std/core/alloc (no hover on Vec::len etc.).
+					-- Mason's copy is only a fallback; install with
+					-- `rustup component add rust-analyzer`.
+					cmd = (rustup_rust_analyzer ~= nil) and { rustup_rust_analyzer }
+						or ((vim.fn.executable(mason_rust_analyzer) == 1) and { mason_rust_analyzer } or nil),
 					capabilities = caps,
 					handlers = {
 						["experimental/serverStatus"] = rust_server_status_handler,
