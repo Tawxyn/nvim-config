@@ -196,6 +196,15 @@ require("lazy").setup({
 					linehl = "GitSignsChangeLn",
 				},
 			},
+			-- Staged hunks keep signs (and stay navigable) after `git add`
+			signs_staged = {
+				add = { text = "+" },
+				change = { text = "~" },
+				delete = { text = "-" },
+				topdelete = { text = "-" },
+				changedelete = { text = "~" },
+			},
+			signs_staged_enable = true,
 			numhl = false,
 			linehl = false,
 			current_line_blame = false,
@@ -204,49 +213,25 @@ require("lazy").setup({
 				local map = function(lhs, rhs, desc, mode)
 					vim.keymap.set(mode or "n", lhs, rhs, { buffer = bufnr, desc = desc })
 				end
-				local jump_hunk_start = function(direction)
-					local hunks = gs.get_hunks(bufnr) or {}
-					if #hunks == 0 then
-						vim.notify("No hunks", vim.log.levels.WARN)
-						return
-					end
-
-					local line = vim.api.nvim_win_get_cursor(0)[1]
-					local target
-
-					if direction == "next" then
-						for _, hunk in ipairs(hunks) do
-							if hunk.added.start > line then
-								target = hunk
-								break
-							end
-						end
-						target = target or hunks[1]
-					else
-						for i = #hunks, 1, -1 do
-							local hunk = hunks[i]
-							if hunk.added.start < line then
-								target = hunk
-								break
-							end
-						end
-						target = target or hunks[#hunks]
-					end
-
-					vim.cmd([[normal! m']])
-					vim.api.nvim_win_set_cursor(0, { math.max(target.added.start, 1), 0 })
+				-- Navigate hunks regardless of whether they are staged or not
+				local nav_hunk = function(direction)
+					gs.nav_hunk(direction, { target = "all" })
 				end
 
 				-- Hunk navigation
-				map("]h", gs.next_hunk, "Next Hunk")
-				map("[h", gs.prev_hunk, "Prev Hunk")
+				map("]h", function()
+					nav_hunk("next")
+				end, "Next Hunk")
+				map("[h", function()
+					nav_hunk("prev")
+				end, "Prev Hunk")
 
 				-- Hunk actions
 				map("<leader>hn", function()
-					jump_hunk_start("next")
+					nav_hunk("next")
 				end, "Next Hunk")
 				map("<leader>hm", function()
-					jump_hunk_start("prev")
+					nav_hunk("prev")
 				end, "Prev Hunk")
 				map("<leader>hs", gs.stage_hunk, "Stage Hunk")
 				map("<leader>hr", gs.reset_hunk, "Reset Hunk")
@@ -273,6 +258,15 @@ require("lazy").setup({
 				vim.api.nvim_set_hl(0, "GitSignsDelete", { fg = "#ff5555" })
 				vim.api.nvim_set_hl(0, "GitSignsDeleteNr", { fg = "#ff5555" })
 				vim.api.nvim_set_hl(0, "GitSignsChangedelete", { fg = "#ffff00" })
+				-- Dimmed variants for hunks that are already staged
+				vim.api.nvim_set_hl(0, "GitSignsStagedAdd", { fg = "#5e7d2a" })
+				vim.api.nvim_set_hl(0, "GitSignsStagedAddNr", { fg = "#5e7d2a" })
+				vim.api.nvim_set_hl(0, "GitSignsStagedChange", { fg = "#8a8a00" })
+				vim.api.nvim_set_hl(0, "GitSignsStagedChangeNr", { fg = "#8a8a00" })
+				vim.api.nvim_set_hl(0, "GitSignsStagedDelete", { fg = "#8a3030" })
+				vim.api.nvim_set_hl(0, "GitSignsStagedDeleteNr", { fg = "#8a3030" })
+				vim.api.nvim_set_hl(0, "GitSignsStagedTopdelete", { fg = "#8a3030" })
+				vim.api.nvim_set_hl(0, "GitSignsStagedChangedelete", { fg = "#8a8a00" })
 			end
 			set_gitsigns_hl()
 			vim.api.nvim_create_autocmd("ColorScheme", {
@@ -1067,6 +1061,36 @@ Run ':RustLsp logFile' for details.
 					"branch",
 					{
 						"diff",
+						-- gitsigns' status dict only counts unstaged hunks, so staged
+						-- changes would vanish from the statusline after `git add`.
+						-- Fold the staged hunks back in.
+						source = function()
+							local bufnr = vim.api.nvim_get_current_buf()
+							local added, changed, removed = 0, 0, 0
+
+							local unstaged = vim.b[bufnr].gitsigns_status_dict
+							if unstaged then
+								added = unstaged.added or 0
+								changed = unstaged.changed or 0
+								removed = unstaged.removed or 0
+							end
+
+							local ok, cache = pcall(require, "gitsigns.cache")
+							if ok then
+								local bcache = cache.cache[bufnr]
+								if bcache and bcache.hunks_staged then
+									local staged = require("gitsigns.hunks").get_summary(bcache.hunks_staged)
+									added = added + staged.added
+									changed = changed + staged.changed
+									removed = removed + staged.removed
+								end
+							end
+
+							if added == 0 and changed == 0 and removed == 0 then
+								return nil
+							end
+							return { added = added, modified = changed, removed = removed }
+						end,
 						colored = true,
 						symbols = { added = "+", modified = "~", removed = "-" },
 						diff_color = {
