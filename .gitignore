@@ -10,3 +10,7 @@ Session.vim
 
 # Tag files
 tags
+
+# Local Neovim log
+.nvimlog
+nvim.log
